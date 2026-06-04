@@ -3,6 +3,16 @@
 #include "usart.h"
 #include "LidarParser.hpp"
 
+#include <math.h>
+
+struct Point2D {
+	float x;
+	float y;
+	uint16_t quality;
+};
+
+Point2D scan_cloud[12];
+
 const uint16_t BUFFER_SIZE = 512;
 uint8_t dma_rx_buffer[BUFFER_SIZE];
 
@@ -20,6 +30,43 @@ void process_dma_ringbuffer() {
 
 		if (parser.processByte(next_byte) == true) {
 			latest_valid_packet = parser.getPacket();
+
+			//0xA000 (40960) offset + 64x conversion
+			float start_deg = (latest_valid_packet.start_angle - 40960) / 64.0f;
+			float end_deg   = (latest_valid_packet.end_angle - 40960) / 64.0f;
+
+			start_deg = fmodf(start_deg, 360.0f);
+			end_deg = fmodf(end_deg, 360.0f);
+
+			float diff = end_deg - start_deg;
+
+			if(diff < 0.0f)
+			{
+				diff += 360.0;
+			}
+
+			float step_deg = diff / 11.0f;
+
+			for(int i = 0; i < 12; i++)
+			{
+				uint16_t dist_mm = latest_valid_packet.points[i].distance_mm;
+				scan_cloud[i].quality = latest_valid_packet.points[i].quality;
+
+				if(dist_mm == 0)
+				{
+					scan_cloud[i].x = 0.0f;
+					scan_cloud[i].y = 0.0f;
+					continue;
+				}
+
+				float current_deg = start_deg + (i * step_deg);
+				current_deg = fmodf(current_deg, 360.0f);
+
+				float current_rad = current_deg * (M_PI / 180.0f);
+
+				scan_cloud[i].x = dist_mm * cosf(current_rad);
+				scan_cloud[i].y = dist_mm * sinf(current_rad);
+			}
 		}
 
 		read_index++;
