@@ -4,6 +4,8 @@
 #include "LidarParser.hpp"
 
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 struct Point2D {
 	float x;
@@ -31,29 +33,30 @@ void process_dma_ringbuffer() {
 		if (parser.processByte(next_byte) == true) {
 			latest_valid_packet = parser.getPacket();
 
-			//0xA000 (40960) offset + 64x conversion
-			float start_deg = (latest_valid_packet.start_angle - 40960) / 64.0f;
-			float end_deg   = (latest_valid_packet.end_angle - 40960) / 64.0f;
+			//first bit status (0111... mask) & 64 conversion
+			float start_deg = (latest_valid_packet.start_angle & 0x7FFF) / 64.0f;
+			float end_deg = (latest_valid_packet.end_angle & 0x7FFF) / 64.0f;
 
 			start_deg = fmodf(start_deg, 360.0f);
+			if (start_deg < 0.0f)
+				start_deg += 360.0f;
+
 			end_deg = fmodf(end_deg, 360.0f);
+			if (end_deg < 0.0f)
+				end_deg += 360.0f;
 
 			float diff = end_deg - start_deg;
-
-			if(diff < 0.0f)
-			{
+			if (diff < 0.0f) {
 				diff += 360.0;
 			}
 
 			float step_deg = diff / 11.0f;
 
-			for(int i = 0; i < 12; i++)
-			{
+			for (int i = 0; i < 12; i++) {
 				uint16_t dist_mm = latest_valid_packet.points[i].distance_mm;
 				scan_cloud[i].quality = latest_valid_packet.points[i].quality;
 
-				if(dist_mm == 0)
-				{
+				if (dist_mm == 0) {
 					scan_cloud[i].x = 0.0f;
 					scan_cloud[i].y = 0.0f;
 					continue;
@@ -66,6 +69,20 @@ void process_dma_ringbuffer() {
 
 				scan_cloud[i].x = dist_mm * cosf(current_rad);
 				scan_cloud[i].y = dist_mm * sinf(current_rad);
+			}
+
+			char tx_buffer[32];
+			for (int i = 0; i < 12; i++) {
+			    if (scan_cloud[i].x == 0.0f && scan_cloud[i].y == 0.0f) {
+			        continue;
+			    }
+
+			    int x_mm = (int)scan_cloud[i].x;
+			    int y_mm = (int)scan_cloud[i].y;
+
+			    sprintf(tx_buffer, "%d,%d\n", x_mm, y_mm);
+
+			    HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, strlen(tx_buffer), 10);
 			}
 		}
 
