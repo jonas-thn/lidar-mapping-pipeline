@@ -25,3 +25,4 @@ RemoteSystemsTempFiles/
 
 *~
 *.bak
+Python-Debug/.vscode/settings.json

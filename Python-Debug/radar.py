@@ -42,7 +42,7 @@ while True:
             try:
                 x_str, y_str = line.decode('utf-8').strip().split(',')
                 x_mm = int(x_str)
-                y_mm = int(y_str)
+                y_mm = int(y_str)  
                 
                 px = center_x + int(x_mm * SCALE)
                 py = center_y - int(y_mm * SCALE)

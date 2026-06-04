@@ -1,0 +1,23 @@
+menu "STM32 Lidar Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID (Network Name)"
+        default "MyNetwork"
+
+    config WIFI_PASSWORD
+        string "WiFi Password"
+        default "Secret123"
+
+    config PC_TARGET_IP
+        string "Target PC IP Address (for UDP)"
+        default "192.168.178.20"
+
+    config PC_TARGET_PORT
+        int "Target Port (UDP)"
+        default 4242
+
+    config UART_RX_PIN
+        int "ESP32 RX Pin (Data from STM32)"
+        default 16
+
+endmenu
