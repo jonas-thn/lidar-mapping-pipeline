@@ -12,28 +12,35 @@ struct LidarPoint {
 };
 
 struct LidarPacket {
-	uint8_t unknown_byte;
-	uint8_t num_points;
-	uint16_t speed;
-	uint16_t start_angle;
-	LidarPoint points[12];
-	uint32_t checksum;
+    uint8_t  sync1;
+    uint8_t  sync2;
+    uint8_t  type;
+    uint8_t  num_points;
+    uint16_t speed;
+    uint16_t start_angle;
+    LidarPoint points[12];
+    uint16_t end_angle;
+    uint16_t crc16;
 };
 
 #pragma pack(pop)
 
 enum class ParserState {
-	SYNC1, SYNC2, HEADER, PAYLOAD, FOOTER
+    SYNC1,
+    SYNC2,
+    COLLECT
 };
 
 class LidarParser {
 private:
 	ParserState state = ParserState::SYNC1;
 
-	uint8_t temp_buffer[48];
+	uint8_t raw_buffer[60];
 	uint8_t byte_counter = 0;
 
 	LidarPacket current_packet;
+
+	uint16_t calculateCRC16(const uint8_t* data, uint16_t len);
 
 public:
 	bool processByte(uint8_t byte);

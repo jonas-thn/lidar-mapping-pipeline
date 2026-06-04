@@ -1,70 +1,49 @@
 #include "LidarParser.hpp"
+#include <string.h>
 
 bool LidarParser::processByte(uint8_t byte) {
 	switch (state) {
 	case ParserState::SYNC1:
 		if (byte == 0x55) {
+			raw_buffer[0] = byte;
 			state = ParserState::SYNC2;
 		}
 		break;
 
 	case ParserState::SYNC2:
 		if (byte == 0xAA) {
-			state = ParserState::HEADER;
-			byte_counter = 0;
+			raw_buffer[1] = byte;
+			byte_counter = 2;
+			state = ParserState::COLLECT;
+		} else if (byte == 0x55) {
+			raw_buffer[0] = byte;
 		} else {
 			state = ParserState::SYNC1;
 		}
 		break;
 
-	case ParserState::HEADER:
-		temp_buffer[byte_counter++] = byte;
-		if (byte_counter == 6) {
-			current_packet.unknown_byte = temp_buffer[0];
-			current_packet.num_points = temp_buffer[1];
-			current_packet.speed = (temp_buffer[3] << 8) | temp_buffer[2];
-			current_packet.start_angle = (temp_buffer[5] << 8) | temp_buffer[4];
+	case ParserState::COLLECT:
+		raw_buffer[byte_counter++] = byte;
 
-			if (current_packet.num_points != 12) {
-				state = ParserState::SYNC1;
-				break;
+		if (byte_counter == 60) {
+			memcpy(&current_packet, raw_buffer, 60);
+
+			for (int i = 0; i < 12; i++) {
+				uint16_t raw_distance = current_packet.points[i].distance_mm;
+
+				if (raw_distance & 0x8000) {
+					current_packet.points[i].distance_mm = 0;
+				} else {
+					current_packet.points[i].distance_mm = raw_distance
+							& 0x3FFF;
+				}
 			}
-
-			state = ParserState::PAYLOAD;
-			byte_counter = 0;
-		}
-		break;
-
-	case ParserState::PAYLOAD:
-		temp_buffer[byte_counter++] = byte;
-		if (byte_counter == 48) {
-			uint8_t *dest = (uint8_t*) current_packet.points;
-
-			for (int i = 0; i < 48; i++) {
-				dest[i] = temp_buffer[i];
-			}
-
-			state = ParserState::FOOTER;
-			byte_counter = 0;
-		}
-		break;
-
-	case ParserState::FOOTER:
-		temp_buffer[byte_counter++] = byte;
-
-		if (byte_counter == 4) {
-			current_packet.checksum = (temp_buffer[3] << 24)
-					| (temp_buffer[2] << 16) | (temp_buffer[1] << 8)
-					| temp_buffer[0];
-
-			//TODO Chechsum Test
 
 			state = ParserState::SYNC1;
 			return true;
 		}
 		break;
 	}
-
 	return false;
 }
 
