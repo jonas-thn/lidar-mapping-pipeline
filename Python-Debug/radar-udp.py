@@ -1,44 +1,49 @@
-#py -3.12 .\radar.py
+#py -3.12 .\radar-udp.py
 
-import serial
+import socket
 import pygame
 import sys
 
-SERIAL_PORT = 'COM5'  
-BAUD_RATE = 115200
-SCALE = 0.25          
+UDP_IP = "0.0.0.0" 
+UDP_PORT = 4242     
+SCALE = 0.25
                       
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((UDP_IP, UDP_PORT))
+sock.setblocking(False) 
+
 pygame.init()
 WIDTH, HEIGHT = 800, 800
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("LiDAR Echtzeit Radar")
+pygame.display.set_caption("LiDAR Wireless Telemetry")
 clock = pygame.time.Clock()
 
 fade_surface = pygame.Surface((WIDTH, HEIGHT))
 fade_surface.fill((0, 0, 0))
 fade_surface.set_alpha(5)  
 
-try:
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
-except Exception as e:
-    print(f"Error: {e}")
-    sys.exit()
-
 center_x, center_y = WIDTH // 2, HEIGHT // 2
 buffer = b''
+
+print(f"Echolot aktiv. Lausche auf UDP Port {UDP_PORT}...")
 
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            ser.close()
+            sock.close()
             pygame.quit()
             sys.exit()
 
-    buffer += ser.read(ser.in_waiting)
+    try:
+        while True:
+            data, addr = sock.recvfrom(4096)
+            buffer += data
+    except BlockingIOError:
+        pass 
     
     if b'\n' in buffer:
         lines = buffer.split(b'\n')
-        buffer = lines[-1]  
+        buffer = lines[-1]  # Den unvollständigen Rest für später aufheben
         
         for line in lines[:-1]:
             try:
@@ -55,7 +60,6 @@ while True:
                 pass 
 
     screen.blit(fade_surface, (0, 0))
-    
     pygame.draw.circle(screen, (255, 0, 0), (center_x, center_y), 4)
     
     pygame.display.flip()

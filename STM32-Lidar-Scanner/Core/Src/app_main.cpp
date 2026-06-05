@@ -82,7 +82,7 @@ void process_dma_ringbuffer() {
 
 			    sprintf(tx_buffer, "%d,%d\n", x_mm, y_mm);
 
-			    HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, strlen(tx_buffer), 10);
+			    HAL_UART_Transmit(&huart6, (uint8_t*)tx_buffer, strlen(tx_buffer), 10);
 			}
 		}
 

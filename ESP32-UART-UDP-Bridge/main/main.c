@@ -71,15 +71,23 @@ static void udp_stream_task(void *pvParameters)
 
     ESP_LOGI(TAG, "UDP open: %s:%d", CONFIG_PC_TARGET_IP, CONFIG_PC_TARGET_PORT);
 
-    uint8_t rx_buffer[60];
+    uint8_t rx_buffer[256];
+    uint32_t packet_counter = 0;
 
     while (1)
     {
-        int rx_bytes = uart_read_bytes(uart_num, rx_buffer, sizeof(rx_buffer), portMAX_DELAY);
+        int rx_bytes = uart_read_bytes(uart_num, rx_buffer, sizeof(rx_buffer), pdMS_TO_TICKS(10));
 
-        if (rx_bytes == sizeof(rx_buffer))
+        if (rx_bytes > 0)
         {
-            sendto(sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            packet_counter++;
+            
+            if (packet_counter % 20 == 0)
+            {
+                ESP_LOGI(TAG, "RX Heartbeat: %d Bytes vom STM32 gelesen und gesendet.", rx_bytes);
+            }
+
+            sendto(sock, rx_buffer, rx_bytes, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         }
     }
 }
