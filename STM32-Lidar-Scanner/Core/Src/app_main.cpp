@@ -1,7 +1,12 @@
 #include "app_main.h"
+
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "main.h"
 #include "usart.h"
 #include "LidarParser.hpp"
+#include "StepperMotor.hpp"
 
 #include <math.h>
 #include <stdio.h>
@@ -19,11 +24,17 @@ struct Point3D {
 
 const uint16_t BUFFER_SIZE = 512;
 uint8_t dma_rx_buffer[BUFFER_SIZE];
-
 uint16_t read_index = 0;
 LidarParser parser;
-
 LidarPacket latest_valid_packet;
+
+extern TIM_HandleTypeDef htim1;
+StepperMotor motor(&htim1, TIM_CHANNEL_1, MOTOR_DIR_GPIO_Port, MOTOR_DIR_Pin);
+
+volatile float simulated_motor_angle = 0.0f;
+
+void vMotorSimulationTask(void *pvParameters);
+void vLidarSimulationTask(void *pvParameters);
 
 void process_dma_ringbuffer() {
 	uint16_t dma_counter = __HAL_DMA_GET_COUNTER(huart1.hdmarx); //counts backwards
@@ -87,14 +98,62 @@ void process_dma_ringbuffer() {
 }
 
 void app_main(void) {
-	HAL_UART_Receive_DMA(&huart1, dma_rx_buffer, sizeof(dma_rx_buffer));
+//	HAL_UART_Receive_DMA(&huart1, dma_rx_buffer, sizeof(dma_rx_buffer));
+//
+//	motor.setDirection(true);
+//	motor.setSpeedHz(50);
+//	motor.start();
+
+	xTaskCreate(vMotorSimulationTask, "Motor Simulation", 256, NULL, 3, NULL);
+
+	xTaskCreate(vLidarSimulationTask, "Lidar Simulation", 512, NULL, 2, NULL);
 
 	while (1) {
 		HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
-		process_dma_ringbuffer();
+//		process_dma_ringbuffer();
 
-		HAL_Delay(500);
+		vTaskDelay(pdMS_TO_TICKS(50));
+	}
+}
+
+void vMotorSimulationTask(void *pvParameters) {
+	const TickType_t xDelayPeriod = pdMS_TO_TICKS(10);
+
+	const float angle_increment = 3.6f;
+
+	while (1) {
+		simulated_motor_angle += angle_increment;
+
+		if (simulated_motor_angle >= 360.0f) {
+			simulated_motor_angle -= 360.0f;
+		}
+
+		vTaskDelay(xDelayPeriod);
+	}
+}
+
+void vLidarSimulationTask(void *pvParameters) {
+	const TickType_t xDelayPeriod = pdMS_TO_TICKS(40);
+
+	Point3D mock_point;
+	mock_point.sync_word = 0xAA55;
+	mock_point.quality = 0x0064;
+
+	while (1) {
+		float current_deg = simulated_motor_angle;
+		float current_rad = current_deg * (M_PI / 180.0);
+
+		int16_t simulated_z = (int16_t)(300.0f * sinf(current_rad * 2.0f));
+
+		uint16_t base_distance_mm = 1200;
+		mock_point.x_mm = (int16_t)(base_distance_mm * cosf(current_rad));
+		mock_point.y_mm = (int16_t)(base_distance_mm * sinf(current_rad));
+		mock_point.z_mm = simulated_z;
+
+		HAL_UART_Transmit(&huart6, (uint8_t*)&mock_point, sizeof(Point3D), 10);
+
+		vTaskDelay(xDelayPeriod);
 	}
 }
 
