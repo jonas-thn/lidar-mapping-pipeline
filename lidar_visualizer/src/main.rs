@@ -1,20 +1,27 @@
 mod context;
+mod network;
+mod types;
 
 use context::GraphicsContext;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use types::Point3D;
 use winit::application::ApplicationHandler;
-use winit::event::{self, WindowEvent};
-use winit::event_loop::{self, ControlFlow, EventLoop};
+use winit::event::WindowEvent;
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
 struct App {
     state: Option<GraphicsContext>,
+    window: Option<Arc<Window>>,
+    point_cloud: Arc<Mutex<Vec<Point3D>>>,
+    last_logged_count: usize
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window_attributes = Window::default_attributes().with_title("3D LiDAR Visualizer");
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+        self.window = Some(window.clone());
 
         let context = pollster::block_on(GraphicsContext::new(window.clone()));
         self.state = Some(context);
@@ -23,7 +30,7 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
-        window_id: winit::window::WindowId,
+        _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
         let Some(ref mut state) = self.state else {
@@ -38,23 +45,46 @@ impl ApplicationHandler for App {
                 state.resize(physical_size);
             }
             WindowEvent::RedrawRequested => {
-                //TODO
+                let count = self.point_cloud.lock().unwrap().len();
+
+                if count % 100 == 0 && count > 0 && count != self.last_logged_count {
+                    log::info!("Point count: {}", count);
+                    self.last_logged_count = count;
+                }
             }
             _ => (),
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        if let Some(ref _state) = self.state {}
+    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
     }
 }
 
 fn main() {
-    env_logger::init();
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+
+    let point_cloud = Arc::new(Mutex::new(Vec::new()));
+    let point_cloud_network_clone = Arc::clone(&point_cloud);
+    let udp_listen_port: u16 = 4242;
+
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            network::run_udp_listener(udp_listen_port, point_cloud_network_clone).await;
+        });
+    });
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App { state: None };
+    let mut app = App {
+        state: None,
+        window: None,
+        point_cloud,
+        last_logged_count: 0
+    };
     event_loop.run_app(&mut app).unwrap();
 }
