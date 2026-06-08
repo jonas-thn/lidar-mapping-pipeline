@@ -25,7 +25,8 @@ pub async fn run_udp_listener(port: u16, shared_point_cloud: Arc<Mutex<Vec<Point
                         let mut cloud = shared_point_cloud.lock().unwrap();
                         cloud.push(*point);
 
-                        if cloud.len() > 50_000 {
+                        //IMPORTANT
+                        if cloud.len() > 15 {
                             cloud.remove(0);
                         }
 

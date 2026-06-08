@@ -1,6 +1,7 @@
 mod context;
 mod network;
 mod types;
+mod gpu;
 
 use context::GraphicsContext;
 use std::sync::{Arc, Mutex};
@@ -10,8 +11,10 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
+use crate::gpu::GpuState;
+
 struct App {
-    state: Option<GraphicsContext>,
+    state: Option<GpuState>,
     window: Option<Arc<Window>>,
     point_cloud: Arc<Mutex<Vec<Point3D>>>,
     last_logged_count: usize
@@ -24,7 +27,7 @@ impl ApplicationHandler for App {
         self.window = Some(window.clone());
 
         let context = pollster::block_on(GraphicsContext::new(window.clone()));
-        self.state = Some(context);
+        self.state = Some(pollster::block_on(GpuState::new(context)));
     }
 
     fn window_event(
@@ -42,15 +45,21 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
-                state.resize(physical_size);
+                state.ctx.resize(physical_size);
             }
             WindowEvent::RedrawRequested => {
-                let count = self.point_cloud.lock().unwrap().len();
+                let points = {
+                    let cloud = self.point_cloud.lock().unwrap();
+                    cloud.clone() 
+                }; 
 
+                let count = points.len();
                 if count % 100 == 0 && count > 0 && count != self.last_logged_count {
                     log::info!("Point count: {}", count);
                     self.last_logged_count = count;
                 }
+
+                state.render(&points);
             }
             _ => (),
         }
