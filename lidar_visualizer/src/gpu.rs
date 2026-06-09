@@ -3,6 +3,7 @@ use crate::context::GraphicsContext;
 use crate::gui::Gui;
 use crate::types::{GridVertex, Point3D, PointInstance, QuadVertex};
 use wgpu::util::DeviceExt;
+use crate::gui::DashboardStats;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -28,7 +29,7 @@ pub struct GpuState {
 
 fn create_grid_vertices(size: f32, step: f32) -> Vec<GridVertex> {
     let mut vertices = Vec::new();
-    let color = [0.15, 0.15, 0.15];
+    let color = [0.05, 0.05, 0.05];
 
     let mut i = -size;
 
@@ -304,16 +305,16 @@ impl GpuState {
         }
     }
 
-    pub fn render(&mut self, raw_points: &[Point3D], window: &winit::window::Window) {
+    pub fn render(&mut self, raw_points: &[Point3D], window: &winit::window::Window, stats: &DashboardStats) -> bool {
         let output = match self.ctx.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 self.ctx.resize(self.ctx.size);
-                return;
+                return false;
             }
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => return,
-            _ => return,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => return false,
+            _ => return false,
         };
 
         let view = output
@@ -367,9 +368,9 @@ impl GpuState {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
+                            r: 0.0025,
+                            g: 0.0025,
+                            b: 0.0025,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -401,7 +402,7 @@ impl GpuState {
             render_pass.draw(0..4 as u32, 0..point_count as u32);
         }
 
-        let user_cmd_bufs = self.gui.draw(
+        let (user_cmd_bufs, clear_requested) = self.gui.draw(
             window,
             &self.ctx.device,
             &self.ctx.queue,
@@ -409,6 +410,7 @@ impl GpuState {
             &view,
             self.ctx.config.width,
             self.ctx.config.height,
+            stats
         );
 
         self.ctx.queue.submit(
@@ -418,5 +420,7 @@ impl GpuState {
         );
 
         output.present();
+
+        clear_requested
     }
 }

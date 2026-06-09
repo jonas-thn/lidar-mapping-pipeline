@@ -1,7 +1,14 @@
 use egui::Context;
 use egui_wgpu::{Renderer, RendererOptions};
 use egui_winit::State;
+use std::time::Instant;
 use winit::window::Window;
+
+pub struct DashboardStats {
+    pub total_points: usize,
+    pub pps: usize,
+    pub is_connected: bool,
+}
 
 pub struct Gui {
     pub context: Context,
@@ -52,11 +59,63 @@ impl Gui {
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
-    ) -> Vec<wgpu::CommandBuffer> {
+        stats: &DashboardStats,
+    ) -> (Vec<wgpu::CommandBuffer>, bool) {
+        let mut clear_requested = false;
+
         let raw_input = self.state.take_egui_input(window);
         self.context.begin_pass(raw_input);
 
-        self.build_ui();
+        // self.build_ui();
+        egui::Window::new("Status")
+            .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .show(&self.context, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{} pts/s", stats.pps));
+
+                    ui.add_space(30.0);
+
+                    if stats.is_connected {
+                        ui.label(egui::RichText::new("Online").color(egui::Color32::GREEN));
+                    } else {
+                        ui.label(egui::RichText::new("Offline").color(egui::Color32::RED));
+                    }
+                });
+
+                ui.add_space(4.0);
+
+                let fill_ratio = stats.total_points as f32 / 50_000.0;
+                let visuals = ui.visuals();
+
+                ui.add_sized(
+                    [120.0, 14.0],
+                    egui::ProgressBar::new(fill_ratio)
+                        .fill(visuals.widgets.active.bg_fill) 
+                        .text(
+                            egui::RichText::new(format!("Buffer: {} / 50k", stats.total_points))
+                                .color(visuals.widgets.inactive.fg_stroke.color),
+                        ),
+                );
+            });
+
+        egui::Window::new("Controls")
+            .anchor(egui::Align2::RIGHT_BOTTOM, [-10.0, -10.0])
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .show(&self.context, |ui| {
+                ui.checkbox(&mut self.show_grid, "Show Grid");
+
+                ui.add_space(5.0);
+
+                if ui.button("🗑 Clear Point Cloud").clicked() {
+                    clear_requested = true;
+                }
+            });
+        // --------------------------
 
         let full_output = self.context.end_pass();
         self.state
@@ -106,6 +165,6 @@ impl Gui {
             self.renderer.free_texture(id);
         }
 
-        user_cmd_bufs
+        (user_cmd_bufs, clear_requested)
     }
 }

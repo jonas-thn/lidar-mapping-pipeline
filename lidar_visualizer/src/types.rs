@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Point3D {
@@ -11,14 +13,14 @@ pub struct Point3D {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct QuadVertex {
-    pub position: [f32; 2]
+    pub position: [f32; 2],
 }
 
 impl QuadVertex {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<QuadVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex, 
+            step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[wgpu::VertexAttribute {
                 offset: 0,
                 shader_location: 0, // Kabel 0
@@ -80,6 +82,26 @@ impl GridVertex {
                     format: wgpu::VertexFormat::Float32x3,
                 },
             ],
+        }
+    }
+}
+
+pub struct CloudState {
+    pub points: Vec<Point3D>,
+    pub last_packet_time: Instant,
+    pub points_this_second: usize,
+    pub current_pps: usize,
+    pub last_pps_calc: Instant,
+}
+
+impl CloudState {
+    pub fn new() -> Self {
+        Self {
+            points: Vec::with_capacity(50_000),
+            last_packet_time: Instant::now(),
+            points_this_second: 0,
+            current_pps: 0,
+            last_pps_calc: Instant::now(),
         }
     }
 }

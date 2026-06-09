@@ -1,8 +1,9 @@
-use crate::types::Point3D;
+use crate::types::{Point3D, CloudState};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::net::UdpSocket;
 
-pub async fn run_udp_listener(port: u16, shared_point_cloud: Arc<Mutex<Vec<Point3D>>>) {
+pub async fn run_udp_listener(port: u16, shared_state: Arc<Mutex<CloudState>>) {
     let addr = format!("0.0.0.0:{}", port);
     log::info!("Listening UDP on {}", addr);
 
@@ -22,12 +23,22 @@ pub async fn run_udp_listener(port: u16, shared_point_cloud: Arc<Mutex<Vec<Point
                         let point_bytes = &byte_stream[0..10];
                         let point: &Point3D = bytemuck::from_bytes(point_bytes);
 
-                        let mut cloud = shared_point_cloud.lock().unwrap();
-                        cloud.push(*point);
+                        let mut state = shared_state.lock().unwrap();
+                        state.points.push(*point);
 
-                        //IMPORTANT
-                        if cloud.len() > 15 {
-                            cloud.remove(0);
+                        let now = Instant::now();
+                        state.last_packet_time = now;
+                        state.points_this_second += 1;
+
+                        if now.duration_since(state.last_pps_calc).as_secs_f32() >= 1.0 {
+                            state.current_pps = state.points_this_second;
+                            state.points_this_second = 0;
+                            state.last_pps_calc = now;
+                        }
+
+                        //limit 
+                        if state.points.len() > 50_000 {
+                            state.points.remove(0);
                         }
 
                         byte_stream.drain(0..10);

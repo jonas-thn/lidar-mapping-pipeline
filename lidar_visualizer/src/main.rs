@@ -7,7 +7,8 @@ mod types;
 
 use context::GraphicsContext;
 use std::sync::{Arc, Mutex};
-use types::Point3D;
+use types::{Point3D, CloudState}; 
+use gui::DashboardStats;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event::{DeviceEvent, ElementState, MouseButton};
@@ -19,7 +20,7 @@ use crate::gpu::GpuState;
 struct App {
     state: Option<GpuState>,
     window: Option<Arc<Window>>,
-    point_cloud: Arc<Mutex<Vec<Point3D>>>,
+    shared_cloud: Arc<Mutex<CloudState>>,
     last_logged_count: usize,
     mouse_pressed: bool,
 }
@@ -58,18 +59,28 @@ impl ApplicationHandler for App {
                 state.resize(physical_size);
             }
             WindowEvent::RedrawRequested => {
-                let points = {
-                    let cloud = self.point_cloud.lock().unwrap();
-                    cloud.clone()
+                let (points, stats) = {
+                    let mut cloud = self.shared_cloud.lock().unwrap();
+                    
+                    // Berechnen, ob wir in der letzten Sekunde etwas gehört haben
+                    let is_connected = std::time::Instant::now().duration_since(cloud.last_packet_time).as_secs_f32() < 1.0;
+                    
+                    let stats = DashboardStats {
+                        total_points: cloud.points.len(),
+                        pps: cloud.current_pps,
+                        is_connected,
+                    };
+                    (cloud.points.clone(), stats)
                 };
 
-                let count = points.len();
-                if count % 100 == 0 && count > 0 && count != self.last_logged_count {
-                    log::info!("Point count: {}", count);
-                    self.last_logged_count = count;
+                let clear_requested = state.render(&points, window, &stats);
+                
+                // Hat der Nutzer auf den Mülleimer-Button geklickt?
+                if clear_requested {
+                    let mut cloud = self.shared_cloud.lock().unwrap();
+                    cloud.points.clear();
                 }
 
-                state.render(&points, window);
             }
             WindowEvent::MouseInput {
                 state: button_state,
@@ -116,7 +127,7 @@ impl ApplicationHandler for App {
 fn main() {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
-    let point_cloud = Arc::new(Mutex::new(Vec::new()));
+    let point_cloud = Arc::new(Mutex::new(CloudState::new()));
     let point_cloud_network_clone = Arc::clone(&point_cloud);
     let udp_listen_port: u16 = 4242;
 
@@ -133,7 +144,7 @@ fn main() {
     let mut app = App {
         state: None,
         window: None,
-        point_cloud,
+        shared_cloud: point_cloud,
         last_logged_count: 0,
         mouse_pressed: false,
     };
