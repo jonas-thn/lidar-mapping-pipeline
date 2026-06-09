@@ -29,8 +29,8 @@ impl Camera {
     }
 
     pub fn process_mouse(&mut self, dx: f64, dy: f64) {
-        self.yaw -= dx as f32 * self.sensitivity;
-        self.pitch -= dy as f32 * self.sensitivity;
+        self.yaw += dx as f32 * self.sensitivity;
+        self.pitch += dy as f32 * self.sensitivity;
 
         let half_pi = std::f32::consts::PI / 2.0 - 0.01;
         self.pitch = self.pitch.clamp(-half_pi, half_pi);
@@ -51,7 +51,7 @@ impl Camera {
     }
 
     pub fn get_uniform(&self, aspect_ratio: f32) -> CameraUniform {
-        let proj = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 10000.0);
+        let proj = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 50000.0);
         
         let cam_x = self.distance * self.pitch.cos() * self.yaw.sin();
         let cam_y = self.distance * self.pitch.cos() * self.yaw.cos();

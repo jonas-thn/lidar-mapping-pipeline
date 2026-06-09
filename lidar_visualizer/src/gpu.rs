@@ -7,13 +7,38 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 pub struct GpuState {
     pub ctx: GraphicsContext,
+
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+    max_points: u32,
+
+    grid_pipeline: wgpu::RenderPipeline,
+    grid_vertex_buffer: wgpu::Buffer,
+    grid_vertex_count: u32,
+
     camera_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     depth_texture_view: wgpu::TextureView,
-    max_points: u32,
     pub camera: Camera
+}
+
+fn create_grid_vertices(size: f32, step: f32) -> Vec<GpuVertex> {
+    let mut vertices = Vec::new();
+    let color = [0.15, 0.15, 0.15];
+
+    let mut i = -size;
+
+    while i <= size {
+        vertices.push(GpuVertex { position: [i, -size, 0.0], color });
+        vertices.push(GpuVertex { position: [i, size, 0.0], color });
+
+        vertices.push(GpuVertex { position: [-size, i, 0.0], color });
+        vertices.push(GpuVertex { position: [size, i, 0.0], color });
+
+        i += step;
+    }
+
+    vertices
 }
 
 fn create_depth_texture(
@@ -133,6 +158,51 @@ impl GpuState {
                 cache: None,
             });
 
+        let grid_pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Grid Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[GpuVertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ctx.config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList, 
+                front_face: wgpu::FrontFace::Ccw,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let grid_vertices = create_grid_vertices(5000.0, 500.0);
+        let grid_vertex_count = grid_vertices.len() as u32;
+
+        let grid_vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Vertex Buffer"),
+            contents: bytemuck::cast_slice(&grid_vertices),
+            usage: wgpu::BufferUsages::VERTEX
+        });
+
         let depth_texture_view = create_depth_texture(&ctx.device, &ctx.config);
 
         let max_points = 50_000;
@@ -152,6 +222,9 @@ impl GpuState {
             depth_texture_view,
             max_points,
             camera,
+            grid_pipeline,
+            grid_vertex_buffer,
+            grid_vertex_count,
         };
     }
 
@@ -239,6 +312,11 @@ impl GpuState {
                 }),
                 ..Default::default()
             });
+
+            render_pass.set_pipeline(&self.grid_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]); 
+            render_pass.set_vertex_buffer(0, self.grid_vertex_buffer.slice(..));
+            render_pass.draw(0..self.grid_vertex_count, 0..1);
 
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
