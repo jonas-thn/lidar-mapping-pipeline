@@ -1,6 +1,7 @@
 mod camera;
 mod context;
 mod gpu;
+mod gui;
 mod network;
 mod types;
 
@@ -30,7 +31,7 @@ impl ApplicationHandler for App {
         self.window = Some(window.clone());
 
         let context = pollster::block_on(GraphicsContext::new(window.clone()));
-        self.state = Some(pollster::block_on(GpuState::new(context)));
+        self.state = Some(pollster::block_on(GpuState::new(context, &window)));
     }
 
     fn window_event(
@@ -42,6 +43,12 @@ impl ApplicationHandler for App {
         let Some(ref mut state) = self.state else {
             return;
         };
+
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+
+        let ui_consumed_event = state.gui.handle_event(window, &event);
 
         match event {
             WindowEvent::CloseRequested => {
@@ -62,20 +69,23 @@ impl ApplicationHandler for App {
                     self.last_logged_count = count;
                 }
 
-                state.render(&points);
+                state.render(&points, window);
             }
             WindowEvent::MouseInput {
                 state: button_state,
                 button: MouseButton::Left,
                 ..
             } => {
-                self.mouse_pressed = button_state == ElementState::Pressed;
+                if !ui_consumed_event {
+                    self.mouse_pressed = button_state == ElementState::Pressed;
+                } else if button_state == ElementState::Released {
+                    self.mouse_pressed = false; 
+                }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let Some(ref mut state) = self.state else {
-                    return;
-                };
-                state.camera.process_scroll(&delta);
+                if !ui_consumed_event {
+                    state.camera.process_scroll(&delta);
+                }
             }
             _ => (),
         }

@@ -12,3 +12,6 @@ bytemuck = {version = "1", features = ["derive"]}
 env_logger = "0.11"
 log = "0.4"
 tokio = { version = "1.36", features = ["full"] }
+egui = "0.34.3"
+egui-winit = "0.34.3"
+egui-wgpu = "0.34.3"

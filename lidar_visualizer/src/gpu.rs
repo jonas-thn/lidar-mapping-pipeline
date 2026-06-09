@@ -1,8 +1,8 @@
+use crate::camera::Camera;
 use crate::context::GraphicsContext;
-use crate::types::{GridVertex, QuadVertex, PointInstance, Point3D};
+use crate::gui::Gui;
+use crate::types::{GridVertex, Point3D, PointInstance, QuadVertex};
 use wgpu::util::DeviceExt;
-use wgpu::wgc::device;
-use crate::camera::{Camera};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -21,7 +21,9 @@ pub struct GpuState {
     camera_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     depth_texture_view: wgpu::TextureView,
-    pub camera: Camera
+
+    pub camera: Camera,
+    pub gui: Gui,
 }
 
 fn create_grid_vertices(size: f32, step: f32) -> Vec<GridVertex> {
@@ -31,11 +33,23 @@ fn create_grid_vertices(size: f32, step: f32) -> Vec<GridVertex> {
     let mut i = -size;
 
     while i <= size {
-        vertices.push(GridVertex { position: [i, -size, 0.0], color });
-        vertices.push(GridVertex { position: [i, size, 0.0], color });
+        vertices.push(GridVertex {
+            position: [i, -size, 0.0],
+            color,
+        });
+        vertices.push(GridVertex {
+            position: [i, size, 0.0],
+            color,
+        });
 
-        vertices.push(GridVertex { position: [-size, i, 0.0], color });
-        vertices.push(GridVertex { position: [size, i, 0.0], color });
+        vertices.push(GridVertex {
+            position: [-size, i, 0.0],
+            color,
+        });
+        vertices.push(GridVertex {
+            position: [size, i, 0.0],
+            color,
+        });
 
         i += step;
     }
@@ -45,9 +59,9 @@ fn create_grid_vertices(size: f32, step: f32) -> Vec<GridVertex> {
 
 fn hue_to_rgb(hue_degrees: f32) -> [f32; 3] {
     let h = (hue_degrees / 60.0) % 6.0;
-    
+
     let x = 1.0 - (h % 2.0 - 1.0).abs(); //triangle wave
-    
+
     let (r, g, b) = if h < 1.0 {
         (1.0, x, 0.0)
     } else if h < 2.0 {
@@ -91,7 +105,7 @@ fn create_depth_texture(
 }
 
 impl GpuState {
-    pub async fn new(ctx: GraphicsContext) -> Self {
+    pub async fn new(ctx: GraphicsContext, window: &winit::window::Window) -> Self {
         let shader = ctx
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -182,72 +196,89 @@ impl GpuState {
                 cache: None,
             });
 
-        let grid_pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Grid Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_grid"),
-                buffers: &[GridVertex::desc()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_grid"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: ctx.config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList, 
-                front_face: wgpu::FrontFace::Ccw,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let grid_pipeline = ctx
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Grid Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_grid"),
+                    buffers: &[GridVertex::desc()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_grid"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: ctx.config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
 
         let grid_vertices = create_grid_vertices(5000.0, 500.0);
         let grid_vertex_count = grid_vertices.len() as u32;
 
-        let grid_vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grid Vertex Buffer"),
-            contents: bytemuck::cast_slice(&grid_vertices),
-            usage: wgpu::BufferUsages::VERTEX
-        });
+        let grid_vertex_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Grid Vertex Buffer"),
+                contents: bytemuck::cast_slice(&grid_vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
         let depth_texture_view = create_depth_texture(&ctx.device, &ctx.config);
 
         let quad_vertices: &[QuadVertex] = &[
-            QuadVertex { position: [-1.0, -1.0] }, 
-            QuadVertex { position: [ 1.0, -1.0] }, 
-            QuadVertex { position: [-1.0,  1.0] }, 
-            QuadVertex { position: [ 1.0,  1.0] },
+            QuadVertex {
+                position: [-1.0, -1.0],
+            },
+            QuadVertex {
+                position: [1.0, -1.0],
+            },
+            QuadVertex {
+                position: [-1.0, 1.0],
+            },
+            QuadVertex {
+                position: [1.0, 1.0],
+            },
         ];
-        let quad_vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Quad Vertex Buffer"),
-            contents: bytemuck::cast_slice(quad_vertices),
-            usage: wgpu::BufferUsages::VERTEX
-        });
+        let quad_vertex_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Quad Vertex Buffer"),
+                contents: bytemuck::cast_slice(quad_vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
         let max_points = 50_000;
         let instance_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Instance Buffer"),
-            size: (max_points as usize * std::mem::size_of::<PointInstance>()) as wgpu::BufferAddress,
+            size: (max_points as usize * std::mem::size_of::<PointInstance>())
+                as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+
+        let gui = Gui::new(&ctx.device, ctx.config.format, window);
 
         return GpuState {
             ctx,
@@ -262,6 +293,7 @@ impl GpuState {
             grid_vertex_count,
             quad_vertex_buffer,
             instance_buffer,
+            gui,
         };
     }
 
@@ -272,7 +304,7 @@ impl GpuState {
         }
     }
 
-    pub fn render(&mut self, raw_points: &[Point3D]) {
+    pub fn render(&mut self, raw_points: &[Point3D], window: &winit::window::Window) {
         let output = match self.ctx.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -306,14 +338,18 @@ impl GpuState {
             let hue = (1.0 - quality_factor) * 240.0; //in degrees
             let heat_color = hue_to_rgb(hue);
 
-            gpu_instances.push(PointInstance { 
+            gpu_instances.push(PointInstance {
                 position: [p.x_mm as f32, p.y_mm as f32, p.z_mm as f32],
                 color: heat_color,
             });
         }
 
         if !gpu_instances.is_empty() {
-            self.ctx.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&gpu_instances));
+            self.ctx.queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&gpu_instances),
+            );
         }
 
         let mut encoder = self
@@ -351,18 +387,36 @@ impl GpuState {
                 ..Default::default()
             });
 
-            render_pass.set_pipeline(&self.grid_pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]); 
-            render_pass.set_vertex_buffer(0, self.grid_vertex_buffer.slice(..));
-            render_pass.draw(0..self.grid_vertex_count, 0..1);
+            if self.gui.show_grid {
+                render_pass.set_pipeline(&self.grid_pipeline);
+                render_pass.set_bind_group(0, &self.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.grid_vertex_buffer.slice(..));
+                render_pass.draw(0..self.grid_vertex_count, 0..1);
+            }
 
             render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.draw(0..4 as u32, 0..point_count as u32);
         }
 
-        self.ctx.queue.submit(std::iter::once(encoder.finish()));
+        let user_cmd_bufs = self.gui.draw(
+            window,
+            &self.ctx.device,
+            &self.ctx.queue,
+            &mut encoder,
+            &view,
+            self.ctx.config.width,
+            self.ctx.config.height,
+        );
+
+        self.ctx.queue.submit(
+            user_cmd_bufs
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
+
         output.present();
     }
 }
