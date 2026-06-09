@@ -1,14 +1,9 @@
 use crate::context::GraphicsContext;
 use crate::types::{GpuVertex, Point3D};
 use wgpu::util::DeviceExt;
+use crate::camera::{Camera};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
-}
 
 pub struct GpuState {
     pub ctx: GraphicsContext,
@@ -18,10 +13,7 @@ pub struct GpuState {
     bind_group: wgpu::BindGroup,
     depth_texture_view: wgpu::TextureView,
     max_points: u32,
-
-    pub camera_distance: f32,
-    pub camera_yaw: f32,
-    pub camera_pitch: f32,
+    pub camera: Camera
 }
 
 fn create_depth_texture(
@@ -58,9 +50,9 @@ impl GpuState {
                 source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
             });
 
-        let camera_uniform = CameraUniform {
-            view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
-        };
+        let camera = Camera::new();
+        let aspect = ctx.config.width as f32 / ctx.config.height as f32;
+        let camera_uniform = camera.get_uniform(aspect);
 
         let camera_buffer = ctx
             .device
@@ -159,10 +151,7 @@ impl GpuState {
             bind_group,
             depth_texture_view,
             max_points,
-
-            camera_distance: 2000.0,
-            camera_yaw: 0.0,
-            camera_pitch: 45.0_f32.to_radians(),
+            camera,
         };
     }
 
@@ -190,21 +179,7 @@ impl GpuState {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let aspect = self.ctx.config.width as f32 / self.ctx.config.height as f32;
-        let proj = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 10000.0);
-
-        let cam_x = self.camera_distance * self.camera_pitch.cos() * self.camera_yaw.sin();
-        let cam_y = self.camera_distance * self.camera_pitch.cos() * self.camera_yaw.cos();
-        let cam_z = self.camera_distance * self.camera_pitch.sin();
-
-        let view_mat = glam::Mat4::look_at_rh(
-            glam::Vec3::new(cam_x, cam_y, cam_z),
-            glam::Vec3::ZERO,
-            glam::Vec3::Z,
-        );
-
-        let camera_uniform = CameraUniform {
-            view_proj: (proj * view_mat).to_cols_array_2d(),
-        };
+        let camera_uniform = self.camera.get_uniform(aspect);
 
         self.ctx.queue.write_buffer(
             &self.camera_buffer,

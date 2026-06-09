@@ -1,3 +1,4 @@
+mod camera;
 mod context;
 mod gpu;
 mod network;
@@ -8,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use types::Point3D;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta};
+use winit::event::{DeviceEvent, ElementState, MouseButton};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
@@ -74,15 +75,7 @@ impl ApplicationHandler for App {
                 let Some(ref mut state) = self.state else {
                     return;
                 };
-                match delta {
-                    MouseScrollDelta::LineDelta(_, y) => {
-                        state.camera_distance -= y * 200.0;
-                    }
-                    MouseScrollDelta::PixelDelta(pos) => {
-                        state.camera_distance -= pos.y as f32 * 2.0;
-                    }
-                }
-                state.camera_distance = state.camera_distance.max(100.0);
+                state.camera.process_scroll(&delta);
             }
             _ => (),
         }
@@ -96,18 +89,14 @@ impl ApplicationHandler for App {
 
     fn device_event(
         &mut self,
-        event_loop: &winit::event_loop::ActiveEventLoop,
-        device_id: winit::event::DeviceId,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
             if self.mouse_pressed {
                 if let Some(ref mut state) = self.state {
-                    state.camera_yaw -= delta.0 as f32 * 0.005;
-                    state.camera_pitch -= delta.1 as f32 * 0.005;
-
-                    let half_pi = std::f32::consts::PI / 2.0 - 0.01;
-                    state.camera_pitch = state.camera_pitch.clamp(-half_pi, half_pi);
+                    state.camera.process_mouse(delta.0, delta.1);
                 }
             }
         }
