@@ -1,6 +1,7 @@
 use crate::context::GraphicsContext;
-use crate::types::{GpuVertex, Point3D};
+use crate::types::{GridVertex, QuadVertex, PointInstance, Point3D};
 use wgpu::util::DeviceExt;
+use wgpu::wgc::device;
 use crate::camera::{Camera};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -9,7 +10,8 @@ pub struct GpuState {
     pub ctx: GraphicsContext,
 
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
+    quad_vertex_buffer: wgpu::Buffer,
+    instance_buffer: wgpu::Buffer,
     max_points: u32,
 
     grid_pipeline: wgpu::RenderPipeline,
@@ -22,18 +24,18 @@ pub struct GpuState {
     pub camera: Camera
 }
 
-fn create_grid_vertices(size: f32, step: f32) -> Vec<GpuVertex> {
+fn create_grid_vertices(size: f32, step: f32) -> Vec<GridVertex> {
     let mut vertices = Vec::new();
     let color = [0.15, 0.15, 0.15];
 
     let mut i = -size;
 
     while i <= size {
-        vertices.push(GpuVertex { position: [i, -size, 0.0], color });
-        vertices.push(GpuVertex { position: [i, size, 0.0], color });
+        vertices.push(GridVertex { position: [i, -size, 0.0], color });
+        vertices.push(GridVertex { position: [i, size, 0.0], color });
 
-        vertices.push(GpuVertex { position: [-size, i, 0.0], color });
-        vertices.push(GpuVertex { position: [size, i, 0.0], color });
+        vertices.push(GridVertex { position: [-size, i, 0.0], color });
+        vertices.push(GridVertex { position: [size, i, 0.0], color });
 
         i += step;
     }
@@ -127,13 +129,13 @@ impl GpuState {
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[GpuVertex::desc()],
+                    entry_point: Some("vs_lidar"),
+                    buffers: &[QuadVertex::desc(), PointInstance::desc()],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs_main"),
+                    entry_point: Some("fs_lidar"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: ctx.config.format,
                         blend: Some(wgpu::BlendState::REPLACE),
@@ -142,7 +144,7 @@ impl GpuState {
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::PointList,
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
                     front_face: wgpu::FrontFace::Ccw,
                     ..Default::default()
                 },
@@ -163,13 +165,13 @@ impl GpuState {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[GpuVertex::desc()],
+                entry_point: Some("vs_grid"),
+                buffers: &[GridVertex::desc()],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some("fs_grid"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: ctx.config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -205,10 +207,22 @@ impl GpuState {
 
         let depth_texture_view = create_depth_texture(&ctx.device, &ctx.config);
 
+        let quad_vertices: &[QuadVertex] = &[
+            QuadVertex { position: [-1.0, -1.0] }, 
+            QuadVertex { position: [ 1.0, -1.0] }, 
+            QuadVertex { position: [-1.0,  1.0] }, 
+            QuadVertex { position: [ 1.0,  1.0] },
+        ];
+        let quad_vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Quad Vertex Buffer"),
+            contents: bytemuck::cast_slice(quad_vertices),
+            usage: wgpu::BufferUsages::VERTEX
+        });
+
         let max_points = 50_000;
-        let vertex_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Dynamic Vertex Buffer"),
-            size: (max_points as usize * std::mem::size_of::<GpuVertex>()) as wgpu::BufferAddress,
+        let instance_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Instance Buffer"),
+            size: (max_points as usize * std::mem::size_of::<PointInstance>()) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -216,7 +230,6 @@ impl GpuState {
         return GpuState {
             ctx,
             pipeline,
-            vertex_buffer,
             camera_buffer,
             bind_group,
             depth_texture_view,
@@ -225,6 +238,8 @@ impl GpuState {
             grid_pipeline,
             grid_vertex_buffer,
             grid_vertex_count,
+            quad_vertex_buffer,
+            instance_buffer,
         };
     }
 
@@ -261,21 +276,16 @@ impl GpuState {
         );
 
         let point_count = raw_points.len().min(self.max_points as usize);
-        let mut gpu_vertices = Vec::with_capacity(point_count);
-
+        let mut gpu_instances = Vec::with_capacity(point_count);
         for p in raw_points.iter().take(point_count) {
-            gpu_vertices.push(GpuVertex {
+            gpu_instances.push(PointInstance { // GEÄNDERT auf PointInstance
                 position: [p.x_mm as f32, p.y_mm as f32, p.z_mm as f32],
                 color: [0.0, 1.0, 1.0],
             });
         }
 
-        if !gpu_vertices.is_empty() {
-            self.ctx.queue.write_buffer(
-                &self.vertex_buffer,
-                0,
-                bytemuck::cast_slice(&gpu_vertices),
-            );
+        if !gpu_instances.is_empty() {
+            self.ctx.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&gpu_instances));
         }
 
         let mut encoder = self
@@ -319,9 +329,9 @@ impl GpuState {
             render_pass.draw(0..self.grid_vertex_count, 0..1);
 
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..point_count as u32, 0..1);
+            render_pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.draw(0..4 as u32, 0..point_count as u32);
         }
 
         self.ctx.queue.submit(std::iter::once(encoder.finish()));

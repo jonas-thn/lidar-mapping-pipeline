@@ -4,6 +4,8 @@ use winit::event::MouseScrollDelta;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
+    pub view: [[f32; 4]; 4], 
+    pub proj: [[f32; 4]; 4], 
 }
 
 pub struct Camera {
@@ -65,6 +67,8 @@ impl Camera {
 
         CameraUniform {
             view_proj: (proj * view).to_cols_array_2d(),
+            view: view.to_cols_array_2d(),
+            proj: proj.to_cols_array_2d()
         }
     }
 }
