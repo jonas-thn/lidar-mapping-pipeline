@@ -1,13 +1,14 @@
 mod context;
+mod gpu;
 mod network;
 mod types;
-mod gpu;
 
 use context::GraphicsContext;
 use std::sync::{Arc, Mutex};
 use types::Point3D;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
+use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
@@ -17,7 +18,8 @@ struct App {
     state: Option<GpuState>,
     window: Option<Arc<Window>>,
     point_cloud: Arc<Mutex<Vec<Point3D>>>,
-    last_logged_count: usize
+    last_logged_count: usize,
+    mouse_pressed: bool,
 }
 
 impl ApplicationHandler for App {
@@ -45,13 +47,13 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
-                state.ctx.resize(physical_size);
+                state.resize(physical_size);
             }
             WindowEvent::RedrawRequested => {
                 let points = {
                     let cloud = self.point_cloud.lock().unwrap();
-                    cloud.clone() 
-                }; 
+                    cloud.clone()
+                };
 
                 let count = points.len();
                 if count % 100 == 0 && count > 0 && count != self.last_logged_count {
@@ -61,6 +63,27 @@ impl ApplicationHandler for App {
 
                 state.render(&points);
             }
+            WindowEvent::MouseInput {
+                state: button_state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.mouse_pressed = button_state == ElementState::Pressed;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let Some(ref mut state) = self.state else {
+                    return;
+                };
+                match delta {
+                    MouseScrollDelta::LineDelta(_, y) => {
+                        state.camera_distance -= y * 200.0;
+                    }
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        state.camera_distance -= pos.y as f32 * 2.0;
+                    }
+                }
+                state.camera_distance = state.camera_distance.max(100.0);
+            }
             _ => (),
         }
     }
@@ -68,6 +91,25 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        if let DeviceEvent::MouseMotion { delta } = event {
+            if self.mouse_pressed {
+                if let Some(ref mut state) = self.state {
+                    state.camera_yaw -= delta.0 as f32 * 0.005;
+                    state.camera_pitch -= delta.1 as f32 * 0.005;
+
+                    let half_pi = std::f32::consts::PI / 2.0 - 0.01;
+                    state.camera_pitch = state.camera_pitch.clamp(-half_pi, half_pi);
+                }
+            }
         }
     }
 }
@@ -93,7 +135,8 @@ fn main() {
         state: None,
         window: None,
         point_cloud,
-        last_logged_count: 0
+        last_logged_count: 0,
+        mouse_pressed: false,
     };
     event_loop.run_app(&mut app).unwrap();
 }

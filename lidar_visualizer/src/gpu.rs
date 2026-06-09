@@ -1,7 +1,8 @@
 use crate::context::GraphicsContext;
 use crate::types::{GpuVertex, Point3D};
-use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
+
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -15,8 +16,37 @@ pub struct GpuState {
     vertex_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    depth_texture_view: wgpu::TextureView,
     max_points: u32,
-    angle: f32
+
+    pub camera_distance: f32,
+    pub camera_yaw: f32,
+    pub camera_pitch: f32,
+}
+
+fn create_depth_texture(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+) -> wgpu::TextureView {
+    let size = wgpu::Extent3d {
+        width: config.width,
+        height: config.height,
+        depth_or_array_layers: 1,
+    };
+
+    let desc = wgpu::TextureDescriptor {
+        label: Some("Depth Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    };
+
+    let texture = device.create_texture(&desc);
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 impl GpuState {
@@ -28,17 +58,10 @@ impl GpuState {
                 source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
             });
 
-        let aspect = ctx.config.width as f32 / ctx.config.height as f32;
-        let proj = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 10000.0);
-        let view = glam::Mat4::look_at_rh(
-            glam::Vec3::new(0.0, -2500.0, 1500.0),
-            glam::Vec3::ZERO,
-            glam::Vec3::Z,
-        );
-
         let camera_uniform = CameraUniform {
-            view_proj: (proj * view).to_cols_array_2d(),
+            view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
         };
+
         let camera_buffer = ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -106,11 +129,19 @@ impl GpuState {
                     front_face: wgpu::FrontFace::Ccw,
                     ..Default::default()
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview_mask: None,
                 cache: None,
             });
+
+        let depth_texture_view = create_depth_texture(&ctx.device, &ctx.config);
 
         let max_points = 50_000;
         let vertex_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -126,9 +157,20 @@ impl GpuState {
             vertex_buffer,
             camera_buffer,
             bind_group,
+            depth_texture_view,
             max_points,
-            angle: 0.0,
+
+            camera_distance: 2000.0,
+            camera_yaw: 0.0,
+            camera_pitch: 45.0_f32.to_radians(),
         };
+    }
+
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.ctx.resize(new_size);
+            self.depth_texture_view = create_depth_texture(&self.ctx.device, &self.ctx.config);
+        }
     }
 
     pub fn render(&mut self, raw_points: &[Point3D]) {
@@ -146,6 +188,29 @@ impl GpuState {
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let aspect = self.ctx.config.width as f32 / self.ctx.config.height as f32;
+        let proj = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 10000.0);
+
+        let cam_x = self.camera_distance * self.camera_pitch.cos() * self.camera_yaw.sin();
+        let cam_y = self.camera_distance * self.camera_pitch.cos() * self.camera_yaw.cos();
+        let cam_z = self.camera_distance * self.camera_pitch.sin();
+
+        let view_mat = glam::Mat4::look_at_rh(
+            glam::Vec3::new(cam_x, cam_y, cam_z),
+            glam::Vec3::ZERO,
+            glam::Vec3::Z,
+        );
+
+        let camera_uniform = CameraUniform {
+            view_proj: (proj * view_mat).to_cols_array_2d(),
+        };
+
+        self.ctx.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_uniform]),
+        );
 
         let point_count = raw_points.len().min(self.max_points as usize);
         let mut gpu_vertices = Vec::with_capacity(point_count);
@@ -165,30 +230,6 @@ impl GpuState {
             );
         }
 
-        self.angle += 0.005; 
-
-        let aspect = self.ctx.config.width as f32 / self.ctx.config.height as f32;
-        let proj = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 10000.0);
-        
-        let cam_x = self.angle.sin() * 2500.0;
-        let cam_y = self.angle.cos() * 2500.0;
-        
-        let view_cam = glam::Mat4::look_at_rh(
-            glam::Vec3::new(cam_x, cam_y, 1500.0), 
-            glam::Vec3::ZERO,                     
-            glam::Vec3::Z,
-        );
-
-        let camera_uniform = CameraUniform {
-            view_proj: (proj * view_cam).to_cols_array_2d(),
-        };
-
-        self.ctx.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[camera_uniform]),
-        );
-
         let mut encoder = self
             .ctx
             .device
@@ -203,12 +244,24 @@ impl GpuState {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 ..Default::default()
             });
 
