@@ -43,6 +43,28 @@ fn create_grid_vertices(size: f32, step: f32) -> Vec<GridVertex> {
     vertices
 }
 
+fn hue_to_rgb(hue_degrees: f32) -> [f32; 3] {
+    let h = (hue_degrees / 60.0) % 6.0;
+    
+    let x = 1.0 - (h % 2.0 - 1.0).abs(); //triangle wave
+    
+    let (r, g, b) = if h < 1.0 {
+        (1.0, x, 0.0)
+    } else if h < 2.0 {
+        (x, 1.0, 0.0)
+    } else if h < 3.0 {
+        (0.0, 1.0, x)
+    } else if h < 4.0 {
+        (0.0, x, 1.0)
+    } else if h < 5.0 {
+        (x, 0.0, 1.0)
+    } else {
+        (1.0, 0.0, x)
+    };
+
+    [r, g, b]
+}
+
 fn create_depth_texture(
     device: &wgpu::Device,
     config: &wgpu::SurfaceConfiguration,
@@ -277,10 +299,16 @@ impl GpuState {
 
         let point_count = raw_points.len().min(self.max_points as usize);
         let mut gpu_instances = Vec::with_capacity(point_count);
+        let max_quality = 255.0;
+
         for p in raw_points.iter().take(point_count) {
-            gpu_instances.push(PointInstance { // GEÄNDERT auf PointInstance
+            let quality_factor = (p.quality as f32 / max_quality).clamp(0.0, 1.0);
+            let hue = (1.0 - quality_factor) * 240.0; //in degrees
+            let heat_color = hue_to_rgb(hue);
+
+            gpu_instances.push(PointInstance { 
                 position: [p.x_mm as f32, p.y_mm as f32, p.z_mm as f32],
-                color: [0.0, 1.0, 1.0],
+                color: heat_color,
             });
         }
 
