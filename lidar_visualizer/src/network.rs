@@ -28,12 +28,12 @@ pub async fn run_udp_listener(port: u16, shared_state: Arc<Mutex<CloudState>>) {
 
                         let now = Instant::now();
                         state.last_packet_time = now;
-                        state.points_this_second += 1;
+                        state.points_this_second_counter += 1;
 
-                        if now.duration_since(state.last_pps_calc).as_secs_f32() >= 1.0 {
-                            state.current_pps = state.points_this_second;
-                            state.points_this_second = 0;
-                            state.last_pps_calc = now;
+                        if now.duration_since(state.last_pps_time).as_secs_f32() >= 1.0 {
+                            state.current_pps = state.points_this_second_counter;
+                            state.points_this_second_counter = 0;
+                            state.last_pps_time = now;
                         }
 
                         //limit 

@@ -23,7 +23,7 @@ impl QuadVertex {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[wgpu::VertexAttribute {
                 offset: 0,
-                shader_location: 0, // Kabel 0
+                shader_location: 0, 
                 format: wgpu::VertexFormat::Float32x2,
             }],
         }
@@ -89,9 +89,9 @@ impl GridVertex {
 pub struct CloudState {
     pub points: Vec<Point3D>,
     pub last_packet_time: Instant,
-    pub points_this_second: usize,
+    pub points_this_second_counter: usize,
     pub current_pps: usize,
-    pub last_pps_calc: Instant,
+    pub last_pps_time: Instant,
 }
 
 impl CloudState {
@@ -99,9 +99,9 @@ impl CloudState {
         Self {
             points: Vec::with_capacity(50_000),
             last_packet_time: Instant::now(),
-            points_this_second: 0,
+            points_this_second_counter: 0,
             current_pps: 0,
-            last_pps_calc: Instant::now(),
+            last_pps_time: Instant::now(),
         }
     }
 }

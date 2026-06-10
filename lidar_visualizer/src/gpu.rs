@@ -1,6 +1,6 @@
 use crate::camera::Camera;
 use crate::context::GraphicsContext;
-use crate::gui::Gui;
+use crate::gui::{Gui, GuiEvent};
 use crate::types::{GridVertex, Point3D, PointInstance, QuadVertex};
 use wgpu::util::DeviceExt;
 use crate::gui::DashboardStats;
@@ -106,7 +106,7 @@ fn create_depth_texture(
 }
 
 impl GpuState {
-    pub async fn new(ctx: GraphicsContext, window: &winit::window::Window) -> Self {
+    pub async fn new(ctx: GraphicsContext, window: &winit::window::Window, gui_tx: std::sync::mpsc::Sender<GuiEvent>) -> Self {
         let shader = ctx
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -279,7 +279,7 @@ impl GpuState {
             mapped_at_creation: false,
         });
 
-        let gui = Gui::new(&ctx.device, ctx.config.format, window);
+        let gui = Gui::new(&ctx.device, ctx.config.format, window, gui_tx);
 
         return GpuState {
             ctx,
@@ -305,16 +305,16 @@ impl GpuState {
         }
     }
 
-    pub fn render(&mut self, raw_points: &[Point3D], window: &winit::window::Window, stats: &DashboardStats) -> bool {
+    pub fn render(&mut self, raw_points: &[Point3D], window: &winit::window::Window, stats: &DashboardStats) {
         let output = match self.ctx.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 self.ctx.resize(self.ctx.size);
-                return false;
+                return;
             }
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => return false,
-            _ => return false,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => return,
+            _ => return,
         };
 
         let view = output
@@ -402,7 +402,7 @@ impl GpuState {
             render_pass.draw(0..4 as u32, 0..point_count as u32);
         }
 
-        let (user_cmd_bufs, clear_requested) = self.gui.draw(
+        let user_cmd_bufs = self.gui.draw(
             window,
             &self.ctx.device,
             &self.ctx.queue,
@@ -420,7 +420,5 @@ impl GpuState {
         );
 
         output.present();
-
-        clear_requested
     }
 }

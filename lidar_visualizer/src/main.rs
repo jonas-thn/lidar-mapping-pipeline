@@ -6,23 +6,25 @@ mod network;
 mod types;
 
 use context::GraphicsContext;
-use std::sync::{Arc, Mutex};
-use types::{Point3D, CloudState}; 
 use gui::DashboardStats;
+use std::sync::{Arc, Mutex};
+use types::{CloudState};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event::{DeviceEvent, ElementState, MouseButton};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
-
 use crate::gpu::GpuState;
+use gui::GuiEvent;
+use std::sync::mpsc;
 
 struct App {
     state: Option<GpuState>,
     window: Option<Arc<Window>>,
     shared_cloud: Arc<Mutex<CloudState>>,
-    last_logged_count: usize,
     mouse_pressed: bool,
+
+    gui_rx: Option<mpsc::Receiver<GuiEvent>>
 }
 
 impl ApplicationHandler for App {
@@ -31,8 +33,11 @@ impl ApplicationHandler for App {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window = Some(window.clone());
 
+        let (tx, rx) = mpsc::channel();
+        self.gui_rx = Some(rx);
+
         let context = pollster::block_on(GraphicsContext::new(window.clone()));
-        self.state = Some(pollster::block_on(GpuState::new(context, &window)));
+        self.state = Some(pollster::block_on(GpuState::new(context, &window, tx)));
     }
 
     fn window_event(
@@ -60,27 +65,34 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 let (points, stats) = {
-                    let mut cloud = self.shared_cloud.lock().unwrap();
-                    
-                    // Berechnen, ob wir in der letzten Sekunde etwas gehört haben
-                    let is_connected = std::time::Instant::now().duration_since(cloud.last_packet_time).as_secs_f32() < 1.0;
-                    
+                    let cloud = self.shared_cloud.lock().unwrap();
+
+                    let is_connected = std::time::Instant::now()
+                        .duration_since(cloud.last_packet_time)
+                        .as_secs_f32()
+                        < 1.0;
+                    let display_pps = if is_connected { cloud.current_pps } else { 0 };
+
                     let stats = DashboardStats {
                         total_points: cloud.points.len(),
-                        pps: cloud.current_pps,
+                        pps: display_pps,
                         is_connected,
                     };
                     (cloud.points.clone(), stats)
                 };
 
-                let clear_requested = state.render(&points, window, &stats);
-                
-                // Hat der Nutzer auf den Mülleimer-Button geklickt?
-                if clear_requested {
-                    let mut cloud = self.shared_cloud.lock().unwrap();
-                    cloud.points.clear();
-                }
+                state.render(&points, window, &stats);
 
+                if let Some(rx) = &self.gui_rx {
+                    while let Ok(event) = rx.try_recv() {
+                        match event {
+                            GuiEvent::ClearCloud => {
+                                let mut cloud = self.shared_cloud.lock().unwrap();
+                                cloud.points.clear();
+                            }
+                        }
+                    }
+                }
             }
             WindowEvent::MouseInput {
                 state: button_state,
@@ -90,7 +102,7 @@ impl ApplicationHandler for App {
                 if !ui_consumed_event {
                     self.mouse_pressed = button_state == ElementState::Pressed;
                 } else if button_state == ElementState::Released {
-                    self.mouse_pressed = false; 
+                    self.mouse_pressed = false;
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -145,8 +157,8 @@ fn main() {
         state: None,
         window: None,
         shared_cloud: point_cloud,
-        last_logged_count: 0,
         mouse_pressed: false,
+        gui_rx: None,
     };
     event_loop.run_app(&mut app).unwrap();
 }

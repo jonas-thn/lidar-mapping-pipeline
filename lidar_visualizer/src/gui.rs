@@ -1,8 +1,12 @@
 use egui::Context;
 use egui_wgpu::{Renderer, RendererOptions};
 use egui_winit::State;
-use std::time::Instant;
 use winit::window::Window;
+use std::sync::mpsc::Sender;
+
+pub enum GuiEvent {
+    ClearCloud
+}
 
 pub struct DashboardStats {
     pub total_points: usize,
@@ -16,10 +20,11 @@ pub struct Gui {
     pub renderer: Renderer,
 
     pub show_grid: bool,
+    tx: Sender<GuiEvent>
 }
 
 impl Gui {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, window: &Window) -> Self {
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, window: &Window, tx: Sender<GuiEvent>) -> Self {
         let context = Context::default();
         let viewport_id = context.viewport_id();
         let state = State::new(context.clone(), viewport_id, window, None, None, None);
@@ -30,24 +35,14 @@ impl Gui {
             state,
             renderer,
 
-            show_grid: true, // Standardmäßig an
+            show_grid: true,
+            tx
         }
     }
 
     pub fn handle_event(&mut self, window: &Window, event: &winit::event::WindowEvent) -> bool {
         let response = self.state.on_window_event(window, event);
         response.consumed
-    }
-
-    pub fn build_ui(&mut self) {
-        egui::Window::new("Lidar Dashboard")
-            .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
-            .collapsible(false)
-            .resizable(false)
-            .title_bar(false)
-            .show(&self.context, |ui| {
-                ui.checkbox(&mut self.show_grid, "Show Grid");
-            });
     }
 
     pub fn draw(
@@ -60,13 +55,10 @@ impl Gui {
         width: u32,
         height: u32,
         stats: &DashboardStats,
-    ) -> (Vec<wgpu::CommandBuffer>, bool) {
-        let mut clear_requested = false;
-
+    ) -> Vec<wgpu::CommandBuffer> {
         let raw_input = self.state.take_egui_input(window);
         self.context.begin_pass(raw_input);
 
-        // self.build_ui();
         egui::Window::new("Status")
             .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
             .collapsible(false)
@@ -76,7 +68,7 @@ impl Gui {
                 ui.horizontal(|ui| {
                     ui.label(format!("{} pts/s", stats.pps));
 
-                    ui.add_space(30.0);
+                    ui.add_space(29.0);
 
                     if stats.is_connected {
                         ui.label(egui::RichText::new("Online").color(egui::Color32::GREEN));
@@ -91,7 +83,7 @@ impl Gui {
                 let visuals = ui.visuals();
 
                 ui.add_sized(
-                    [120.0, 14.0],
+                    [115.0, 14.0],
                     egui::ProgressBar::new(fill_ratio)
                         .fill(visuals.widgets.active.bg_fill) 
                         .text(
@@ -112,10 +104,9 @@ impl Gui {
                 ui.add_space(5.0);
 
                 if ui.button("🗑 Clear Point Cloud").clicked() {
-                    clear_requested = true;
+                    let _ = self.tx.send(GuiEvent::ClearCloud);
                 }
             });
-        // --------------------------
 
         let full_output = self.context.end_pass();
         self.state
@@ -165,6 +156,6 @@ impl Gui {
             self.renderer.free_texture(id);
         }
 
-        (user_cmd_bufs, clear_requested)
+        user_cmd_bufs
     }
 }
