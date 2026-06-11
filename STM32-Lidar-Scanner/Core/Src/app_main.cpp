@@ -19,6 +19,8 @@ uint16_t read_index = 0;
 LidarParser parser;
 LidarPacket latest_valid_packet;
 
+TaskHandle_t xLidarTaskHandle = NULL;
+
 void process_dma_ringbuffer() {
 	uint16_t dma_counter = __HAL_DMA_GET_COUNTER(huart1.hdmarx); //counts backwards
 	uint16_t write_index = BUFFER_SIZE - dma_counter;
@@ -80,18 +82,26 @@ void process_dma_ringbuffer() {
 	}
 }
 
+void vLidarProcessingTask(void *pvParameters) {
+	while(1) {
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+		process_dma_ringbuffer();
+	}
+}
+
 void app_main(void) {
+	xTaskCreate(vLidarProcessingTask, "Lidar Processing", 1024, NULL, 3, &xLidarTaskHandle);
+
 	HAL_UART_Receive_DMA(&huart1, dma_rx_buffer, sizeof(dma_rx_buffer));
+
+	__HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
 
 //	xTaskCreate(vMotorSimulationTask, "Motor Simulation", 256, NULL, 3, NULL);
 //	xTaskCreate(vLidarSimulationTask, "Lidar Simulation", 512, NULL, 2, NULL);
 
 	while (1) {
-		HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-
-		process_dma_ringbuffer();
-
-		vTaskDelay(pdMS_TO_TICKS(10));
+		vTaskDelay(portMAX_DELAY);
 	}
 }
 
