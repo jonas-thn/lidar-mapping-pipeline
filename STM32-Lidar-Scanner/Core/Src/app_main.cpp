@@ -13,28 +13,34 @@
 #include <stdio.h>
 #include <string.h>
 
-const uint16_t BUFFER_SIZE = 512;
-uint8_t dma_rx_buffer[BUFFER_SIZE];
-uint16_t read_index = 0;
-LidarParser parser;
-LidarPacket latest_valid_packet;
+static constexpr uint16_t RX_BUFFER_SIZE = 512;
+static constexpr uint8_t MAX_POINTS_PER_PACKET = 12;
+static constexpr float LIDAR_RAW_SCALE_FACTOR = 64.0f;
+static constexpr float DEG_TO_RAD = static_cast<float>(M_PI / 180.0f);
+
+static uint8_t rx_buffer[RX_BUFFER_SIZE];
+static uint16_t read_index = 0;
+static LidarParser parser;
+static LidarPacket latest_valid_packet;
+static Point3D tx_buffer[MAX_POINTS_PER_PACKET];
 
 TaskHandle_t xLidarTaskHandle = NULL;
 
-void process_dma_ringbuffer() {
+static void process_dma_ringbuffer() {
 	uint16_t dma_counter = __HAL_DMA_GET_COUNTER(huart1.hdmarx); //counts backwards
-	uint16_t write_index = BUFFER_SIZE - dma_counter;
+	uint16_t write_index = RX_BUFFER_SIZE - dma_counter;
 
 	while (read_index != write_index) {
-		uint8_t next_byte = dma_rx_buffer[read_index];
+		uint8_t next_byte = rx_buffer[read_index];
 
 		if (parser.processByte(next_byte) == true) {
 			latest_valid_packet = parser.getPacket();
 
 			//first bit status (0111... mask) & 64 conversion
-			float start_deg = (latest_valid_packet.start_angle & 0x7FFF)
-					/ 64.0f;
-			float end_deg = (latest_valid_packet.end_angle & 0x7FFF) / 64.0f;
+			float start_deg = static_cast<float>(latest_valid_packet.start_angle
+					& 0x7FFF) / LIDAR_RAW_SCALE_FACTOR;
+			float end_deg = static_cast<float>(latest_valid_packet.end_angle
+					& 0x7FFF) / LIDAR_RAW_SCALE_FACTOR;
 
 			start_deg = fmodf(start_deg, 360.0f);
 			if (start_deg < 0.0f)
@@ -48,42 +54,53 @@ void process_dma_ringbuffer() {
 			if (diff < 0.0f) {
 				diff += 360.0;
 			}
-
 			float step_deg = diff / 11.0f;
 
-			for (int i = 0; i < 12; i++) {
+			uint8_t points_to_send = 0;
+
+			for (int i = 0; i < MAX_POINTS_PER_PACKET; i++) {
 				uint16_t dist_mm = latest_valid_packet.points[i].distance_mm;
 
 				if (dist_mm == 0) {
 					continue;
 				}
 
-				Point3D tx_point;
-				tx_point.quality = latest_valid_packet.points[i].quality;
-
-				float current_deg = start_deg + (i * step_deg);
+				float current_deg = start_deg
+						+ (static_cast<float>(i) * step_deg);
 				current_deg = fmodf(current_deg, 360.0f);
-				float current_rad = current_deg * (M_PI / 180.0f);
+				const float current_rad = current_deg * DEG_TO_RAD;
 
-				tx_point.sync_word = 0xAA55;
-				tx_point.x_mm = (int16_t) (dist_mm * cosf(current_rad));
-				tx_point.y_mm = (int16_t) (dist_mm * sinf(current_rad));
-				tx_point.z_mm = 0;
+				tx_buffer[points_to_send].sync_word = 0xAA55;
+				tx_buffer[points_to_send].quality =
+						latest_valid_packet.points[i].quality;
+				tx_buffer[points_to_send].x_mm = (int16_t) (dist_mm
+						* cosf(current_rad));
+				tx_buffer[points_to_send].y_mm = (int16_t) (dist_mm
+						* sinf(current_rad));
+				tx_buffer[points_to_send].z_mm = 0;
 
-				HAL_UART_Transmit(&huart6, (uint8_t*) &tx_point,
-						sizeof(Point3D), 10);
+				points_to_send++;
+			}
+
+			if (points_to_send > 0) {
+				while (huart6.gState != HAL_UART_STATE_READY) {
+					vTaskDelay(pdMS_TO_TICKS(1));
+				}
+
+				HAL_UART_Transmit_DMA(&huart6, (uint8_t*) tx_buffer,
+						sizeof(Point3D) * points_to_send);
 			}
 		}
 
 		read_index++;
-		if (read_index >= BUFFER_SIZE) {
+		if (read_index >= RX_BUFFER_SIZE) {
 			read_index = 0;
 		}
 	}
 }
 
-void vLidarProcessingTask(void *pvParameters) {
-	while(1) {
+static void vLidarProcessingTask(void *pvParameters) {
+	while (1) {
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 		process_dma_ringbuffer();
@@ -91,9 +108,10 @@ void vLidarProcessingTask(void *pvParameters) {
 }
 
 void app_main(void) {
-	xTaskCreate(vLidarProcessingTask, "Lidar Processing", 1024, NULL, 3, &xLidarTaskHandle);
+	xTaskCreate(vLidarProcessingTask, "Lidar Processing", 1024, NULL, 3,
+			&xLidarTaskHandle);
 
-	HAL_UART_Receive_DMA(&huart1, dma_rx_buffer, sizeof(dma_rx_buffer));
+	HAL_UART_Receive_DMA(&huart1, rx_buffer, sizeof(rx_buffer));
 
 	__HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
 
@@ -104,5 +122,4 @@ void app_main(void) {
 		vTaskDelay(portMAX_DELAY);
 	}
 }
-
 

@@ -1,11 +1,11 @@
 use egui::Context;
 use egui_wgpu::{Renderer, RendererOptions};
 use egui_winit::State;
-use winit::window::Window;
 use std::sync::mpsc::Sender;
+use winit::window::Window;
 
 pub enum GuiEvent {
-    ClearCloud
+    ClearCloud,
 }
 
 pub struct DashboardStats {
@@ -20,11 +20,16 @@ pub struct Gui {
     pub renderer: Renderer,
 
     pub show_grid: bool,
-    tx: Sender<GuiEvent>
+    tx: Sender<GuiEvent>,
 }
 
 impl Gui {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, window: &Window, tx: Sender<GuiEvent>) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        window: &Window,
+        tx: Sender<GuiEvent>,
+    ) -> Self {
         let context = Context::default();
         let viewport_id = context.viewport_id();
         let state = State::new(context.clone(), viewport_id, window, None, None, None);
@@ -36,7 +41,7 @@ impl Gui {
             renderer,
 
             show_grid: true,
-            tx
+            tx,
         }
     }
 
@@ -59,33 +64,38 @@ impl Gui {
         let raw_input = self.state.take_egui_input(window);
         self.context.begin_pass(raw_input);
 
+        let ui_width = 130.0;
+
         egui::Window::new("Status")
             .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
             .collapsible(false)
             .resizable(false)
             .title_bar(false)
+            .default_width(ui_width)
             .show(&self.context, |ui| {
+                ui.set_min_width(ui_width);
+
                 ui.horizontal(|ui| {
                     ui.label(format!("{} pts/s", stats.pps));
 
-                    ui.add_space(29.0);
-
-                    if stats.is_connected {
-                        ui.label(egui::RichText::new("Online").color(egui::Color32::GREEN));
-                    } else {
-                        ui.label(egui::RichText::new("Offline").color(egui::Color32::RED));
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if stats.is_connected {
+                            ui.label(egui::RichText::new("Online").color(egui::Color32::GREEN));
+                        } else {
+                            ui.label(egui::RichText::new("Offline").color(egui::Color32::RED));
+                        }
+                    });
                 });
 
-                ui.add_space(4.0);
+                ui.add_space(6.0);
 
                 let fill_ratio = stats.total_points as f32 / 50_000.0;
                 let visuals = ui.visuals();
 
-                ui.add_sized(
-                    [115.0, 14.0],
+                ui.add(
                     egui::ProgressBar::new(fill_ratio)
-                        .fill(visuals.widgets.active.bg_fill) 
+                        .desired_width(ui.available_width())
+                        .fill(visuals.widgets.active.bg_fill)
                         .text(
                             egui::RichText::new(format!("Buffer: {} / 50k", stats.total_points))
                                 .color(visuals.widgets.inactive.fg_stroke.color),
@@ -98,7 +108,10 @@ impl Gui {
             .collapsible(false)
             .resizable(false)
             .title_bar(false)
+            .default_width(ui_width)
             .show(&self.context, |ui| {
+                ui.set_min_width(ui_width);
+
                 ui.checkbox(&mut self.show_grid, "Show Grid");
 
                 ui.add_space(5.0);
