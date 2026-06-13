@@ -16,7 +16,7 @@ A custom handheld 3D scanning setup built with a 360° LiDAR and an IMU. The pro
 
 <p width="100%">
   <img src="imgs/scan.png" width="61%" />
-  <img src="imgs/door.png" width="38%" />
+  <img src="imgs/door.png" width="37%" />
 </p>
 
 ## Tech Stack
