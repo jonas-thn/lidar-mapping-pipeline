@@ -8,9 +8,9 @@ public:
 	IMUSensor(I2C_HandleTypeDef* hi2c);
 
 	bool init();
-
 	void update();
 
+	void resetYaw();
 	float getYawDegrees() const;
 
 private:

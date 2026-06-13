@@ -39,7 +39,7 @@ static constexpr uint8_t MAX_POINTS_PER_PACKET = 12;
 static constexpr float LIDAR_RAW_SCALE_FACTOR = 64.0f;
 static constexpr float DEG_TO_RAD = static_cast<float>(M_PI / 180.0f);
 
-static constexpr float ARM_OFFSET_MM = 400.0;
+static constexpr float ARM_OFFSET_MM = 300.0;
 
 static uint8_t rx_buffer[RX_BUFFER_SIZE];
 static uint16_t read_index = 0;
@@ -55,6 +55,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == B1_Pin) {
 		if (current_state == ScannerState::IDLE) {
 			current_state = ScannerState::SCANNING;
+			imu.resetYaw();
 		} else if (current_state == ScannerState::SCANNING) {
 			current_state = ScannerState::IDLE;
 		}

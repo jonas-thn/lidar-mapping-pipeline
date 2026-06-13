@@ -78,7 +78,7 @@ void IMUSensor::calibrate() {
 				/ static_cast<float>(valid_samples);
 		printf("Calibration complete. Offset = %f\r\n", gyro_zero_rate_bias);
 	} else {
-		printf("Calibration failed! I2C read error.\r\n");
+		printf("Calibration failed.\r\n");
 		gyro_zero_rate_bias = 0.0f;
 	}
 }
@@ -125,6 +125,11 @@ void IMUSensor::update() {
 	} else if (current_yaw_deg < 0.0f) {
 		current_yaw_deg += 360.0f;
 	}
+}
+
+void IMUSensor::resetYaw() {
+	current_yaw_deg = 0.0f;
+	last_update_ticks = xTaskGetTickCount();
 }
 
 float IMUSensor::getYawDegrees() const {
