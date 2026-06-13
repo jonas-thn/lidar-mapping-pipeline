@@ -19,8 +19,6 @@ A custom handheld 3D scanning setup built with a 360° LiDAR and an IMU. The pro
   <img src="imgs/door.png" width="38%" />
 </p>
 
-##Setup
-
 ## Tech Stack
 * Core: STM32F411RE, STM32 HAL, FreeRTOS, CubeMX, C/C++
 * Sensors: LDS08RR (LiDAR), MPU6050 (IMU)
